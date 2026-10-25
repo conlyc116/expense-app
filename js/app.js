@@ -2,8 +2,8 @@ import * as db from './db.js';
 import { CATS, CAT_ZH, CURRENCIES, DEFAULT_RATES, CABINS, LIMITS, PAY_METHODS, NON_CARD_PAY, evaluate, ntdOf, rateOf, curOf, amountOf, hasCard, settleCard, normCur, todayStr, attendeeList, usdRate } from './policy.js';
 import { icon, CAT_KEY } from './icons.js';
 import { parseStatement, matchStatement, applyMatches } from './reconcile.js';
-import { compressImage, dataURLToBlob } from './image.js';
-import { recognize, parseReceipt, tidy } from './ocr.js';
+import { compressImage, prepareForOcr, dataURLToBlob } from './image.js';
+import { recognize, parseReceipt, pickLangs, tidy } from './ocr.js';
 import { buildXlsx, buildReceiptsZip, buildBackup, shareOrDownload } from './export.js';
 
 // ---------- helpers ----------
@@ -54,7 +54,8 @@ function sheet(html, onMount) {
 let draft = null;       // expense being edited
 let draftIsNew = false;
 let draftPhotoUrls = {};
-let ocrState = { running: false, status: '', text: '', filled: new Set() };
+let ocrState = { running: false, status: '', text: '', filled: new Set(), dateFlag: null, dateRaw: '' };
+let ocrSrc = {}; // photoId → 原始檔（僅記憶體，供 OCR 前處理；不入庫）
 
 // ---------- router ----------
 window.addEventListener('hashchange', render);
@@ -259,13 +260,13 @@ async function addPhotoToDraft(file) {
   const id = db.uid();
   await db.put('photos', { id, blob, createdAt: Date.now() });
   draft.photos.push(id); draft._newPhotos = (draft._newPhotos || []).concat(id);
-  draftPhotoUrls[id] = URL.createObjectURL(blob);
+  draftPhotoUrls[id] = URL.createObjectURL(blob); ocrSrc[id] = file;
 }
 function newDraft(trip) {
   const main = Object.keys(trip.rates || {}).find((c) => c !== 'USD' && trip.rates[c]) || 'NTD';
   const today = todayStr();
   draft = { id: db.uid(), tripId: trip.id, date: today >= trip.from && today <= trip.to ? today : trip.from, category: '', description: '', currency: main, customCurrency: '', amount: '', actualNtd: '', business: true, shared: false, attendees: '', seniorPays: true, note: '', photos: [], receiptSeparate: false, cabin: 'Economy', legUnder5h: false, legHours: '', domestic: false, preApproval: false, nights: '', payMethod: settings.lastPay || '信用卡', createdAt: Date.now() };
-  draftIsNew = true; draftPhotoUrls = {}; ocrState = { running: false, status: '', text: '', filled: new Set() };
+  draftIsNew = true; draftPhotoUrls = {}; ocrState = { running: false, status: '', text: '', filled: new Set(), dateFlag: null, dateRaw: '' };
 }
 
 function guessCategory(text) {
@@ -282,8 +283,13 @@ async function runOcr(trip) {
   if (!draft || !draft.photos.length || ocrState.running) return;
   ocrState.running = true; ocrState.status = '準備辨識…'; updateOcrUi();
   try {
-    const p = await db.get('photos', draft.photos[0]);
-    const text = await recognize(p.blob, settings.ocrLangs, (m) => {
+    const pid = draft.photos[0];
+    const p = await db.get('photos', pid);
+    ocrState.status = '影像前處理…'; updateOcrUi();
+    let src = p.blob;
+    try { src = await prepareForOcr(ocrSrc[pid] || p.blob); } catch (e) { console.warn('prepareForOcr failed, using stored photo', e); }
+    const langs = pickLangs(settings.ocrLangs, Object.keys(trip.rates || {}));
+    const text = await recognize(src, langs, (m) => {
       const pct = m.progress ? ` ${Math.round(m.progress * 100)}%` : '';
       const label = { 'loading tesseract core': '載入辨識引擎', 'loading language traineddata': '載入語言資料（第一次較久）', 'initializing api': '初始化', 'recognizing text': '辨識中' }[m.status] || m.status;
       ocrState.status = label + pct; updateOcrUi();
@@ -291,6 +297,7 @@ async function runOcr(trip) {
     ocrState.text = text;
     const main = Object.keys(trip.rates || {}).find((c) => c !== 'USD' && trip.rates[c]) || 'NTD';
     const r = parseReceipt(text, draft.currency || main);
+    ocrState.dateFlag = r.date ? r.dateFlag : null; ocrState.dateRaw = r.dateRaw || '';
     const form = $('#exp-form');
     const fill = (name, val) => {
       if (val === null || val === undefined || val === '') return;
@@ -309,6 +316,7 @@ async function runOcr(trip) {
       fill('description', prefix + r.merchant);
     }
     ocrState.status = r.amount ? '✅ 已帶入辨識結果，請核對' : '辨識完成，但沒找到金額，請手動輸入';
+    if (ocrState.dateFlag) ocrState.status += '；⚠️ 日期請確認';
   } catch (err) {
     console.error(err); ocrState.status = '辨識失敗：' + err.message + '（可手動輸入）';
   } finally {
@@ -324,7 +332,7 @@ async function editorView(trip, eid, keepDraft = false) {
     if (eid === 'new') { if (!draft || draft.tripId !== trip.id || !draftIsNew) newDraft(trip); }
     else {
       const e = await db.get('expenses', eid); if (!e) { location.hash = `#/trip/${trip.id}`; return; }
-      if (!draft || draft.id !== e.id) { draft = { ...e, photos: [...(e.photos || [])] }; draftIsNew = false; draftPhotoUrls = {}; ocrState = { running: false, status: '', text: '', filled: new Set() }; }
+      if (!draft || draft.id !== e.id) { draft = { ...e, photos: [...(e.photos || [])] }; draftIsNew = false; draftPhotoUrls = {}; ocrState = { running: false, status: '', text: '', filled: new Set(), dateFlag: null, dateRaw: '' }; }
     }
   }
   for (const pid of draft.photos) if (!draftPhotoUrls[pid]) { const p = await db.get('photos', pid); if (p) draftPhotoUrls[pid] = URL.createObjectURL(p.blob); }
@@ -367,6 +375,7 @@ async function editorView(trip, eid, keepDraft = false) {
 
     <section class="card" style="margin-top:12px">
       <label>日期<input type="date" name="date" required value="${esc(d.date)}" class="${fb('date')}"></label>
+      ${ocrState.dateFlag && ocrState.filled.has('date') ? `<div class="small date-flag" id="date-flag" role="alert" style="color:#b45309;margin:-4px 0 8px">⚠️ 辨識到「${esc(ocrState.dateRaw)}」→ ${esc(d.date)}，${ocrState.dateFlag === 'future' ? '晚於今天' : '早於一年前'}，請確認日期 <button type="button" class="btn small" id="date-ok">日期無誤</button></div>` : ''}
       <label>說明 Description（英文為佳，會印在 Excel）<input name="description" value="${esc(d.description)}" placeholder="例：Dinner - Penny Black Pub / Taxi (Grab)" class="${fb('description')}"></label>
     </section>
 
@@ -422,6 +431,8 @@ async function editorView(trip, eid, keepDraft = false) {
   form.querySelectorAll('[data-view]').forEach((img) => (img.onclick = () => sheet(`<img class="full" src="${img.src}" alt="收據"><button class="btn block" data-close>關閉</button>`)));
   $('#ph-cam').onclick = () => { syncDraftFromForm(); pickPhoto('camera', trip, true); };
   $('#ph-lib').onclick = () => { syncDraftFromForm(); pickPhoto('library', trip, true); };
+  const dateOk = $('#date-ok'); if (dateOk) dateOk.onclick = () => { ocrState.dateFlag = null; const f = $('#date-flag'); if (f) f.remove(); };
+  const dateIn = form.elements.date; if (dateIn) dateIn.addEventListener('change', () => { ocrState.dateFlag = null; const f = $('#date-flag'); if (f) f.remove(); });
   const ocrBtn = $('#ocr-run'); if (ocrBtn) ocrBtn.onclick = () => { syncDraftFromForm(); runOcr(trip); };
   form.onsubmit = async (ev) => {
     ev.preventDefault(); syncDraftFromForm();

@@ -1,4 +1,5 @@
 // On-device OCR with Tesseract.js (lazy-loaded, all files served locally from vendor/).
+import { detectDate } from './dateparse.js';
 let worker = null; let workerKey = ''; let progressCb = null;
 
 function loadScript(src) {
@@ -26,12 +27,31 @@ export async function recognize(blob, langs, onProgress) {
   return data.text || '';
 }
 
+// 依行程幣別挑語言組合：eng 一律保留；行程有 THB 自動加 tha，且沒有華語幣別時略過中文（較快、較少誤判）；
+// 最多 3 種（iPhone 記憶體／速度）。優先序：eng > 行程相關語言 > 使用者勾選的其他語言。
+export function pickLangs(selected, currencies = []) {
+  const cur = new Set((currencies || []).map((c) => String(c).toUpperCase()));
+  const known = ['eng', 'chi_sim', 'chi_tra', 'tha'];
+  const sel = (selected || []).filter((l) => known.includes(l));
+  const hasTh = cur.has('THB'); const hasCjk = ['RMB', 'CNY', 'HKD', 'NTD', 'TWD', 'JPY'].some((c) => cur.has(c));
+  let out = ['eng'];
+  if (hasTh && !sel.includes('tha')) sel.push('tha');
+  const chi = sel.filter((l) => l.startsWith('chi_'));
+  const skipChi = hasTh && !hasCjk;
+  const rest = [...(sel.includes('tha') ? ['tha'] : []), ...(skipChi ? [] : chi)];
+  out = out.concat(rest.filter((l) => !out.includes(l)));
+  return out.slice(0, 3);
+}
+
 export async function terminate() { if (worker) { await worker.terminate(); worker = null; workerKey = ''; } }
 
 // ---------- Parsing heuristics ----------
 const CJK = '\u3400-\u9fff\uf900-\ufaff';
+const THAI = '\u0e00-\u0e7f';
 export function tidy(s) {
-  return s.replace(new RegExp(`([${CJK}])\\s+(?=[${CJK}])`, 'g'), '$1').replace(/[ \t]+/g, ' ').trim();
+  return s.replace(new RegExp(`([${CJK}])\\s+(?=[${CJK}])`, 'g'), '$1')
+    // Tesseract tha 會在泰文字母間插空白（含 \n 以外的空白）；泰文本身不以空白分字，合併之
+    .replace(new RegExp(`([${THAI}])[ \\t]+(?=[${THAI}])`, 'g'), '$1').replace(/[ \t]+/g, ' ').trim();
 }
 
 function detectCurrency(text, fallback) {
@@ -42,27 +62,6 @@ function detectCurrency(text, fallback) {
   ];
   for (const [c, re] of hits) if (re.test(t)) return c;
   return fallback;
-}
-
-function detectDate(text) {
-  const norm = text.replace(/[年月]/g, '/').replace(/日/g, ' ');
-  const pad = (n) => String(n).padStart(2, '0');
-  const ok = (y, m, d) => m >= 1 && m <= 12 && d >= 1 && d <= 31 && y >= 2000 && y <= 2100;
-  let m = norm.match(/(20\d{2}|25\d{2})\s*[-/.]\s*(\d{1,2})\s*[-/.]\s*(\d{1,2})/);
-  if (m) { let y = +m[1]; if (y > 2400) y -= 543; if (ok(y, +m[2], +m[3])) return `${y}-${pad(m[2])}-${pad(m[3])}`; }
-  m = norm.match(/(\d{1,2})\s*[-/.]\s*(\d{1,2})\s*[-/.]\s*(20\d{2}|25\d{2}|\d{2})(?!\d)/);
-  if (m) {
-    let y = +m[3]; if (y < 100) y += y > 50 ? 2500 : 2000; if (y > 2400) y -= 543;
-    let a = +m[1], b = +m[2]; // assume D/M/Y (TH/HK/UK); if impossible, swap
-    let d = a, mo = b; if (mo > 12 && d <= 12) { d = b; mo = a; }
-    if (ok(y, mo, d)) return `${y}-${pad(mo)}-${pad(d)}`;
-  }
-  const months = { jan: 1, feb: 2, mar: 3, apr: 4, may: 5, jun: 6, jul: 7, aug: 8, sep: 9, oct: 10, nov: 11, dec: 12 };
-  m = norm.match(/(\d{1,2})\s*(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s*,?\s*(20\d{2})/i);
-  if (m) return `${m[3]}-${pad(months[m[2].toLowerCase()])}-${pad(m[1])}`;
-  m = norm.match(/(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s*(\d{1,2}),?\s*(20\d{2})/i);
-  if (m) return `${m[3]}-${pad(months[m[1].toLowerCase()])}-${pad(m[2])}`;
-  return null;
 }
 
 const NUM_RE = /(^|[^\d.,:])(-?\d{1,3}(?:,\d{3})+|-?\d+)(\.\d{1,2})?(?![\d:])/g; // no lookbehind (older iOS)
@@ -116,10 +115,14 @@ function detectMerchant(text) {
   return '';
 }
 
-export function parseReceipt(raw, defaultCurrency) {
+export function parseReceipt(raw, defaultCurrency, opts = {}) {
   const text = raw.split('\n').map(tidy).join('\n');
+  const dt = detectDate(text, { today: opts.today });
   return {
-    date: detectDate(text),
+    date: dt ? dt.date : null,
+    dateFlag: dt ? dt.flag : null,          // 'old' | 'future' | null → UI 請使用者確認
+    dateEra: dt ? dt.era : null,            // 'CE' | 'BE' | 'ROC'
+    dateRaw: dt ? dt.raw : '',
     amount: detectAmount(text),
     currency: detectCurrency(text, defaultCurrency),
     merchant: detectMerchant(text),

@@ -1,15 +1,20 @@
 // Service worker: app shell precached; OCR engine + language data cached on first use.
-const VERSION = 'v1.1.0';
+const VERSION = 'v1.2.0';
 const SHELL = `bt-shell-${VERSION}`;
 const OCR = 'bt-ocr-v1';
+const THA_LANG = 'vendor/tesseract/lang/tha.traineddata.gz'; // 泰文（fast）；放進 OCR 快取，離線可用
 const SHELL_FILES = [
   './', 'index.html', 'styles.css', 'manifest.webmanifest',
-  'tokens.css', 'js/app.js', 'js/db.js', 'js/policy.js', 'js/reconcile.js', 'js/icons.js', 'js/ocr.js', 'js/image.js', 'js/export.js',
+  'tokens.css', 'js/app.js', 'js/db.js', 'js/policy.js', 'js/reconcile.js', 'js/icons.js', 'js/ocr.js', 'js/dateparse.js', 'js/image.js', 'js/export.js',
   'vendor/exceljs.min.js', 'vendor/jszip.min.js',
   'assets/template_blank.xlsx',
   'icons/icon-192.png', 'icons/icon-512.png', 'icons/apple-touch-icon.png', 'icons/icon-maskable-512.png',
 ];
-self.addEventListener('install', (e) => { e.waitUntil(caches.open(SHELL).then((c) => c.addAll(SHELL_FILES)).then(() => self.skipWaiting())); });
+self.addEventListener('install', (e) => { e.waitUntil(Promise.all([
+    caches.open(SHELL).then((c) => c.addAll(SHELL_FILES)),
+    // tha 檔不在時不擋安裝（仍可用設定頁「預先下載」補），但 console 會警告
+    caches.open(OCR).then((c) => c.add(THA_LANG)).catch((err) => console.warn('tha precache failed', err)),
+  ]).then(() => self.skipWaiting())); });
 self.addEventListener('activate', (e) => {
   e.waitUntil(caches.keys().then((keys) => Promise.all(keys.filter((k) => k.startsWith('bt-shell-') && k !== SHELL).map((k) => caches.delete(k)))).then(() => self.clients.claim()));
 });
