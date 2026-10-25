@@ -59,46 +59,70 @@ async function browserAppliesExif() {
   return autoExifCache;
 }
 
+let warnHandler = null;
+export function setImageWarnHandler(fn) { warnHandler = fn; }
+const warn = (m, e) => { try { if (warnHandler) warnHandler(m + (e && e.message ? '：' + e.message : '')); else console.warn(m, e); } catch (_) { /* ignore */ } };
+
 function loadImage(blob) {
   const url = URL.createObjectURL(blob);
   return new Promise((res, rej) => {
     const i = new Image();
     i.onload = () => { URL.revokeObjectURL(url); res(i); };
-    i.onerror = () => { URL.revokeObjectURL(url); rej(new Error('無法讀取圖片（HEIC 請在設定改為「最相容」或截圖後再選）')); };
+    i.onerror = () => { URL.revokeObjectURL(url); rej(new Error('無法讀取圖片（HEIC 請在 iPhone 設定→相機→格式改為「最相容」，或截圖後再選）')); };
     i.src = url;
   });
 }
+const ctx2d = (c) => { try { return c.getContext('2d', { willReadFrequently: true }) || c.getContext('2d'); } catch (_) { return c.getContext('2d'); } };
 
-// 轉正＋縮放，回傳 canvas（呼叫端用完要 releaseCanvas）
+// 轉正＋縮放，回傳 canvas。每一步失敗都退一級：EXIF 讀不到→當作 1；轉正失敗→不轉正直接畫
 async function orientedCanvas(blob, maxSide) {
   let o = 1;
-  try { o = readExifOrientation(await blob.arrayBuffer()); } catch (_) { /* ignore */ }
-  const img = await loadImage(blob);
-  if (o !== 1 && (await browserAppliesExif())) o = 1; // 瀏覽器已轉正，不能再轉一次
+  try { o = readExifOrientation(await blob.arrayBuffer()); } catch (e) { warn('讀取 EXIF 失敗，略過轉正', e); }
+  const img = await loadImage(blob); // 這步失敗是真的讀不到圖，讓上層處理
+  if (o !== 1) { try { if (await browserAppliesExif()) o = 1; } catch (e) { warn('EXIF 偵測失敗', e); } }
   const sw = img.naturalWidth; const sh = img.naturalHeight;
-  const scale = Math.min(1, maxSide / Math.max(sw, sh));
-  const dw = Math.max(1, Math.round(sw * scale)); const dh = Math.max(1, Math.round(sh * scale));
-  const { m, w, h } = orientTransform(o, dw, dh);
-  const c = document.createElement('canvas'); c.width = w; c.height = h;
-  const ctx = c.getContext('2d', { willReadFrequently: true });
-  ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, w, h);
-  ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = 'high';
-  ctx.setTransform(m[0], m[1], m[2], m[3], m[4], m[5]);
-  ctx.drawImage(img, 0, 0, dw, dh);
-  ctx.setTransform(1, 0, 0, 1, 0, 0);
-  return c;
+  if (!sw || !sh) throw new Error('圖片尺寸為 0（可能是不支援的格式）');
+  const draw = (orient, side) => {
+    const scale = Math.min(1, side / Math.max(sw, sh));
+    const dw = Math.max(1, Math.round(sw * scale)); const dh = Math.max(1, Math.round(sh * scale));
+    const { m, w, h } = orientTransform(orient, dw, dh);
+    const c = document.createElement('canvas'); c.width = w; c.height = h;
+    const ctx = ctx2d(c); if (!ctx) { releaseCanvas(c); throw new Error('無法建立 canvas（記憶體不足？）'); }
+    ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, w, h);
+    try { ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = 'high'; } catch (_) { /* ignore */ }
+    ctx.setTransform(m[0], m[1], m[2], m[3], m[4], m[5]);
+    ctx.drawImage(img, 0, 0, dw, dh);
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    return c;
+  };
+  try { return draw(o, maxSide); } catch (e1) {
+    warn('轉正失敗，改用較小尺寸重試', e1);
+    try { return draw(o, Math.min(maxSide, 1200)); } catch (e2) { warn('轉正仍失敗，改為不轉正', e2); return draw(1, Math.min(maxSide, 1200)); }
+  }
 }
-function releaseCanvas(c) { c.width = 0; c.height = 0; } // iOS Safari 不會即時釋放 canvas 記憶體
+function releaseCanvas(c) { try { c.width = 0; c.height = 0; } catch (_) { /* ignore */ } } // iOS Safari 不會即時釋放 canvas 記憶體
 
-const toBlob = (c, type, q) => new Promise((res, rej) => c.toBlob((b) => (b ? res(b) : rej(new Error('圖片輸出失敗'))), type, q));
-
-// 儲存用：轉正、縮小、JPEG 壓縮（keeps IndexedDB small）
-export async function compressImage(file, maxSide = 1600, quality = 0.72) {
-  const c = await orientedCanvas(file, maxSide);
+const toBlob = (c, type, q) => new Promise((res, rej) => {
   try {
+    if (c.toBlob) c.toBlob((b) => (b ? res(b) : rej(new Error('圖片輸出失敗（toBlob 回傳空值）'))), type, q);
+    else rej(new Error('no toBlob'));
+  } catch (e) { rej(e); }
+}).catch(async () => { // 後備：dataURL → Blob
+  const d = c.toDataURL(type, q); return (await fetch(d)).blob();
+});
+
+// 儲存用：轉正、縮小、JPEG 壓縮。任何一步失敗 → 退回原檔（至少照片一定存得進去）
+export async function compressImage(file, maxSide = 1600, quality = 0.72) {
+  let c = null;
+  try {
+    c = await orientedCanvas(file, maxSide);
     const blob = await toBlob(c, 'image/jpeg', quality);
     return { blob, width: c.width, height: c.height };
-  } finally { releaseCanvas(c); }
+  } catch (e) {
+    warn('照片壓縮失敗，改存原圖', e);
+    if (file && file.size && file.size < 15 * 1024 * 1024) return { blob: file, width: 0, height: 0 };
+    throw e;
+  } finally { if (c) releaseCanvas(c); }
 }
 
 // 灰階＋自動色階（1%–99%）＋加強對比；就地處理 ImageData
@@ -121,16 +145,23 @@ export function enhanceGray(data, contrast = 1.25) {
   for (let i = 0; i < data.length; i += 4) { const g = lut[data[i]]; data[i] = data[i + 1] = data[i + 2] = g; data[i + 3] = 255; }
 }
 
-// OCR 前處理：EXIF 轉正 → 長邊縮到 ~2000px → 灰階 → 拉高對比 → PNG（無損，避免再壓縮雜訊）
+// OCR 前處理：EXIF 轉正 → 長邊縮到 ~2000px → 灰階 → 拉高對比 → PNG。
+// 逐步退回：對比處理失敗 → 送未處理的轉正圖；轉正/縮放失敗 → 回傳原檔（呼叫端照樣 OCR）
 export async function prepareForOcr(file, maxSide = 2000) {
-  const c = await orientedCanvas(file, maxSide);
+  let c = null;
   try {
-    const ctx = c.getContext('2d', { willReadFrequently: true });
-    const id = ctx.getImageData(0, 0, c.width, c.height);
-    enhanceGray(id.data);
-    ctx.putImageData(id, 0, 0);
+    c = await orientedCanvas(file, maxSide);
+    try {
+      const ctx = ctx2d(c);
+      const id = ctx.getImageData(0, 0, c.width, c.height);
+      enhanceGray(id.data);
+      ctx.putImageData(id, 0, 0);
+    } catch (e) { warn('灰階／對比處理失敗，使用未增強影像', e); }
     return await toBlob(c, 'image/png');
-  } finally { releaseCanvas(c); }
+  } catch (e) {
+    warn('OCR 前處理失敗，改用原圖', e);
+    return file;
+  } finally { if (c) releaseCanvas(c); }
 }
 
 export function blobToDataURL(blob) { return new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = () => rej(r.error); r.readAsDataURL(blob); }); }

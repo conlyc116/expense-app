@@ -47,11 +47,8 @@ export async function terminate() { if (worker) { await worker.terminate(); work
 
 // ---------- Parsing heuristics ----------
 const CJK = '\u3400-\u9fff\uf900-\ufaff';
-const THAI = '\u0e00-\u0e7f';
 export function tidy(s) {
-  return s.replace(new RegExp(`([${CJK}])\\s+(?=[${CJK}])`, 'g'), '$1')
-    // Tesseract tha 會在泰文字母間插空白（含 \n 以外的空白）；泰文本身不以空白分字，合併之
-    .replace(new RegExp(`([${THAI}])[ \\t]+(?=[${THAI}])`, 'g'), '$1').replace(/[ \t]+/g, ' ').trim();
+  return s.replace(new RegExp(`([${CJK}])\\s+(?=[${CJK}])`, 'g'), '$1').replace(/[ \t]+/g, ' ').trim();
 }
 
 function detectCurrency(text, fallback) {

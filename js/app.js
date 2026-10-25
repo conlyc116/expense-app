@@ -2,8 +2,14 @@ import * as db from './db.js';
 import { CATS, CAT_ZH, CURRENCIES, DEFAULT_RATES, CABINS, LIMITS, PAY_METHODS, NON_CARD_PAY, evaluate, ntdOf, rateOf, curOf, amountOf, hasCard, settleCard, normCur, todayStr, attendeeList, usdRate } from './policy.js';
 import { icon, CAT_KEY } from './icons.js';
 import { parseStatement, matchStatement, applyMatches } from './reconcile.js';
-import { compressImage, prepareForOcr, dataURLToBlob } from './image.js';
-import { recognize, parseReceipt, pickLangs, tidy } from './ocr.js';
+import { compressImage, prepareForOcr, dataURLToBlob, setImageWarnHandler } from './image.js';
+// ocr.js（→ dateparse.js）改為「用到才載入」：任何一個檔漏傳／路徑錯，只會讓辨識失敗並顯示訊息，不會讓整個 app 起不來。
+let ocrMod = null;
+async function getOcr() {
+  if (!ocrMod) { try { ocrMod = await import('./ocr.js'); } catch (e) { throw new Error('辨識模組載入失敗（ocr.js／dateparse.js 可能未部署）：' + (e.message || e)); } }
+  return ocrMod;
+}
+const tidy = (s) => { const CJK = '\u3400-\u9fff\uf900-\ufaff'; return s.replace(new RegExp(`([${CJK}])\\s+(?=[${CJK}])`, 'g'), '$1').replace(/[ \t]+/g, ' ').trim(); };
 import { buildXlsx, buildReceiptsZip, buildBackup, shareOrDownload } from './export.js';
 
 // ---------- helpers ----------
@@ -241,6 +247,17 @@ function itemRow(e, trip, warns) {
 }
 
 // ---------- photo capture ----------
+// 任何錯誤都要讓使用者看得到（不靜默）
+function showError(title, err) {
+  console.error(title, err);
+  const msg = `${title}：${(err && err.message) || err}`;
+  try { toast(msg, 8000); } catch (_) { /* ignore */ }
+  const st = document.getElementById('ocr-status'); if (st) st.textContent = '⚠️ ' + msg;
+}
+window.addEventListener('error', (e) => showError('發生錯誤', e.error || e.message));
+window.addEventListener('unhandledrejection', (e) => showError('發生錯誤', e.reason));
+setImageWarnHandler((m) => { console.warn(m); try { toast('⚠️ ' + m, 5000); } catch (_) { /* ignore */ } });
+
 function pickPhoto(kind, trip, forDraft = false) {
   const input = kind === 'camera' ? $('#file-camera') : $('#file-library');
   input.value = '';
@@ -248,10 +265,15 @@ function pickPhoto(kind, trip, forDraft = false) {
     const files = [...input.files]; if (!files.length) return;
     if (!forDraft) { newDraft(trip); }
     const first = !draft.photos.length;
-    for (const f of files) await addPhotoToDraft(f);
-    if (!forDraft) location.hash = `#/trip/${trip.id}/e/new`;
-    else await editorView(trip, draftIsNew ? 'new' : draft.id, true);
-    if (first && settings.autoOcr) runOcr(trip);
+    let added = 0;
+    for (const f of files) {
+      try { await addPhotoToDraft(f); added++; } catch (err) { showError('照片處理失敗', err); }
+    }
+    try {
+      if (!forDraft) location.hash = `#/trip/${trip.id}/e/new`;
+      else await editorView(trip, draftIsNew ? 'new' : draft.id, true);
+    } catch (err) { showError('畫面更新失敗', err); }
+    if (added && first && settings.autoOcr) runOcr(trip).catch((err) => showError('辨識失敗', err));
   };
   input.click();
 }
@@ -287,7 +309,8 @@ async function runOcr(trip) {
     const p = await db.get('photos', pid);
     ocrState.status = '影像前處理…'; updateOcrUi();
     let src = p.blob;
-    try { src = await prepareForOcr(ocrSrc[pid] || p.blob); } catch (e) { console.warn('prepareForOcr failed, using stored photo', e); }
+    try { src = await prepareForOcr(ocrSrc[pid] || p.blob); } catch (e) { console.warn('prepareForOcr failed, using stored photo', e); ocrState.status = '前處理失敗，改用原圖辨識…'; updateOcrUi(); src = p.blob; }
+    const { recognize, parseReceipt, pickLangs } = await getOcr();
     const langs = pickLangs(settings.ocrLangs, Object.keys(trip.rates || {}));
     const text = await recognize(src, langs, (m) => {
       const pct = m.progress ? ` ${Math.round(m.progress * 100)}%` : '';
@@ -318,7 +341,7 @@ async function runOcr(trip) {
     ocrState.status = r.amount ? '✅ 已帶入辨識結果，請核對' : '辨識完成，但沒找到金額，請手動輸入';
     if (ocrState.dateFlag) ocrState.status += '；⚠️ 日期請確認';
   } catch (err) {
-    console.error(err); ocrState.status = '辨識失敗：' + err.message + '（可手動輸入）';
+    console.error(err); ocrState.status = '⚠️ 辨識失敗：' + ((err && err.message) || err) + '（可手動輸入）'; try { toast(ocrState.status, 8000); } catch (_) { /* ignore */ }
   } finally {
     ocrState.running = false;
     if (location.hash.includes('/e/')) { syncDraftFromForm(); await editorView(trip, draftIsNew ? 'new' : draft.id, true); }

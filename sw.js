@@ -1,5 +1,5 @@
 // Service worker: app shell precached; OCR engine + language data cached on first use.
-const VERSION = 'v1.2.0';
+const VERSION = 'v1.2.1';
 const SHELL = `bt-shell-${VERSION}`;
 const OCR = 'bt-ocr-v1';
 const THA_LANG = 'vendor/tesseract/lang/tha.traineddata.gz'; // 泰文（fast）；放進 OCR 快取，離線可用
@@ -11,7 +11,13 @@ const SHELL_FILES = [
   'icons/icon-192.png', 'icons/icon-512.png', 'icons/apple-touch-icon.png', 'icons/icon-maskable-512.png',
 ];
 self.addEventListener('install', (e) => { e.waitUntil(Promise.all([
-    caches.open(SHELL).then((c) => c.addAll(SHELL_FILES)),
+    // 先整批預快取；任何一個檔 404 會讓 addAll 整批失敗 → 改逐檔加入，少數缺檔不再讓 install 失敗（避免新舊檔混用）
+    caches.open(SHELL).then((c) => c.addAll(SHELL_FILES).catch(async (err) => {
+      console.warn('precache addAll failed, retry per file', err);
+      const miss = [];
+      await Promise.all(SHELL_FILES.map((f) => c.add(f).catch(() => miss.push(f))));
+      if (miss.length) console.warn('precache missing files:', miss);
+    })),
     // tha 檔不在時不擋安裝（仍可用設定頁「預先下載」補），但 console 會警告
     caches.open(OCR).then((c) => c.add(THA_LANG)).catch((err) => console.warn('tha precache failed', err)),
   ]).then(() => self.skipWaiting())); });
