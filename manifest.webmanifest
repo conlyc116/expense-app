@@ -1,0 +1,19 @@
+{
+  "name": "出差報帳 Business Trip Expenses",
+  "short_name": "出差報帳",
+  "lang": "zh-Hant-TW",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#F2F2F7",
+  "theme_color": "#F2F2F7",
+  "shortcuts": [
+    {"name": "拍小票", "short_name": "拍小票", "description": "直接新增一筆費用（進行中的行程）", "url": "./index.html#/quick", "icons": [{"src": "icons/icon-192.png", "sizes": "192x192"}]}
+  ],
+  "icons": [
+    {"src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png"},
+    {"src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png"},
+    {"src": "icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable"}
+  ]
+}

@@ -1,0 +1,152 @@
+/* =========================================================
+   出差報帳 PWA — Design Tokens v1.0
+   - 4pt spacing system；1pt = 1 CSS px（iPhone @2x/@3x 由瀏覽器處理）
+   - 淺色為預設；深色透過 prefers-color-scheme 或 [data-theme="dark"]
+   - 所有前景/背景配對已驗證 WCAG AA（見 design-spec.md §2.5）
+   ========================================================= */
+:root {
+  color-scheme: light dark;
+
+  /* ---------- Neutral / Surface ---------- */
+  --color-bg:            #F2F2F7;   /* 畫面底（iOS grouped background） */
+  --color-surface:       #FFFFFF;   /* 卡片、cell、sheet */
+  --color-surface-2:     #F7F7FA;   /* 卡片內次層、輸入框底 */
+  --color-fill:          rgba(120,120,128,.12); /* 分段控制底、chip 未選 */
+  --color-fill-pressed:  rgba(120,120,128,.24);
+  --color-separator:     rgba(60,60,67,.18);
+  --color-text:          #111114;   /* 主要文字 */
+  --color-text-2:        #4A4A55;   /* 次要文字 8.9:1 */
+  --color-text-3:        #6B6B76;   /* 輔助文字 5.3:1 on surface / 4.7:1 on bg */
+  --color-text-disabled: #A1A1AA;   /* 僅限停用狀態（AA 豁免） */
+  --color-overlay:       rgba(0,0,0,.4);
+  --color-bar-blur:      rgba(249,249,251,.86); /* 底部操作列毛玻璃 */
+
+  /* ---------- Brand / Primary ---------- */
+  --color-primary:         #2F5BEA; /* 白字 5.5:1 */
+  --color-primary-pressed: #2449C4;
+  --color-primary-tint:    #E8EEFF; /* primary 字 4.8:1 */
+  --color-on-primary:      #FFFFFF;
+  --color-focus-ring:      #2F5BEA;
+
+  /* ---------- Semantic ---------- */
+  --color-warning:         #9A5200;  --color-warning-bg: #FFF3E0;  --color-warning-border: #F3C27A;
+  --color-danger:          #C2261D;  --color-danger-bg:  #FDECEA;  --color-danger-border:  #F2A8A2;
+  --color-success:         #1B7A3D;  --color-success-bg: #E6F4EA;  --color-success-border: #9FD3B0;
+  --color-info:            #2F5BEA;  --color-info-bg:    #E8EEFF;
+  --color-estimate:        #6B6B76;  --color-estimate-bg: rgba(120,120,128,.14); /* 「估」 */
+
+  /* ---------- Category（fg = 圖示/文字，tint = 圖示底/選中底）---------- */
+  --cat-air:        #3155D6;  --cat-air-tint:        #E6ECFF;
+  --cat-hotel:      #7A3FC4;  --cat-hotel-tint:      #F1E8FC;
+  --cat-transport:  #A35C00;  --cat-transport-tint:  #FFF1DC;
+  --cat-meals:      #B8361F;  --cat-meals-tint:      #FDE9E4;
+  --cat-comm:       #0A6F86;  --cat-comm-tint:       #E0F4F8;
+  --cat-misc:       #5B6170;  --cat-misc-tint:       #ECEEF2;
+
+  /* ---------- Typography ---------- */
+  --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display",
+               "PingFang TC", "Noto Sans CJK TC", "Noto Sans TC", "Helvetica Neue", sans-serif;
+  --font-rounded: ui-rounded, "SF Pro Rounded", var(--font-sans); /* 金額大字 */
+  --font-mono-num: var(--font-sans); /* 搭配 font-variant-numeric: tabular-nums */
+
+  /* size / line-height / weight — 對應 iOS Dynamic Type「Large」(預設) */
+  --fs-amount:   44px;  --lh-amount:   52px;  --fw-amount:   600; /* 金額輸入 */
+  --fs-large:    34px;  --lh-large:    41px;  --fw-large:    700; /* Large Title */
+  --fs-title1:   28px;  --lh-title1:   34px;  --fw-title1:   700;
+  --fs-title2:   22px;  --lh-title2:   28px;  --fw-title2:   700;
+  --fs-title3:   20px;  --lh-title3:   25px;  --fw-title3:   600;
+  --fs-headline: 17px;  --lh-headline: 22px;  --fw-headline: 600;
+  --fs-body:     17px;  --lh-body:     22px;  --fw-body:     400;
+  --fs-callout:  16px;  --lh-callout:  21px;  --fw-callout:  400;
+  --fs-subhead:  15px;  --lh-subhead:  20px;  --fw-subhead:  400;
+  --fs-footnote: 13px;  --lh-footnote: 18px;  --fw-footnote: 400;
+  --fs-caption1: 12px;  --lh-caption1: 16px;  --fw-caption1: 400;
+  --fs-caption2: 11px;  --lh-caption2: 13px;  --fw-caption2: 500;
+
+  /* ---------- Spacing (4pt) ---------- */
+  --sp-0: 0; --sp-1: 4px; --sp-2: 8px; --sp-3: 12px; --sp-4: 16px; --sp-5: 20px;
+  --sp-6: 24px; --sp-8: 32px; --sp-10: 40px; --sp-12: 48px; --sp-16: 64px;
+  --page-margin: 16px;          /* 左右邊界（iPhone 標準） */
+
+  /* ---------- Radius ---------- */
+  --r-xs: 6px;   /* badge */
+  --r-sm: 10px;  /* input、chip */
+  --r-md: 12px;  /* cell group、card */
+  --r-lg: 16px;  /* 大按鈕、banner */
+  --r-xl: 22px;  /* bottom sheet 上緣 */
+  --r-pill: 999px;
+
+  /* ---------- Elevation ---------- */
+  --shadow-sm:  0 1px 2px rgba(0,0,0,.06);
+  --shadow-md:  0 4px 16px rgba(0,0,0,.08);
+  --shadow-fab: 0 8px 24px rgba(47,91,234,.35), 0 2px 6px rgba(0,0,0,.12);
+  --shadow-sheet: 0 -8px 32px rgba(0,0,0,.12);
+
+  /* ---------- Sizing ---------- */
+  --tap-min: 44px;        /* HIG 最小觸控 */
+  --btn-lg-h: 56px;       /* 主要動作（拇指熱區） */
+  --btn-md-h: 44px;
+  --chip-h: 64px;         /* 類別 chip（圖示上、文字下） */
+  --cell-min-h: 60px;
+  --fab-size: 64px;
+  --bottom-bar-h: 76px;   /* 不含 safe-area */
+  --navbar-h: 44px;
+
+  /* ---------- Safe area（實機用 env()；mock 由 .mock 覆寫）---------- */
+  --safe-top:    env(safe-area-inset-top, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-left:   env(safe-area-inset-left, 0px);
+  --safe-right:  env(safe-area-inset-right, 0px);
+
+  /* ---------- Motion ---------- */
+  --ease-standard: cubic-bezier(.2,.8,.2,1);
+  --ease-spring:   cubic-bezier(.34,1.56,.64,1);
+  --dur-fast: 120ms; --dur-base: 220ms; --dur-slow: 320ms;
+}
+
+/* ---------- Dark ---------- */
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { 
+  --color-bg:#000000; --color-surface:#1C1C1E; --color-surface-2:#2C2C2E;
+  --color-fill:rgba(118,118,128,.24); --color-fill-pressed:rgba(118,118,128,.36);
+  --color-separator:rgba(84,84,88,.6);
+  --color-text:#F5F5F7; --color-text-2:#C7C7CC; --color-text-3:#9A9AA3; --color-text-disabled:#5C5C63;
+  --color-overlay:rgba(0,0,0,.6); --color-bar-blur:rgba(28,28,30,.86);
+  --color-primary:#3A66F5; --color-primary-pressed:#2F5BEA; --color-primary-tint:rgba(58,102,245,.22);
+  --color-on-primary:#FFFFFF; --color-focus-ring:#8EA6FF; --color-info:#8EA6FF; --color-info-bg:rgba(58,102,245,.22);
+  --color-warning:#FFB547; --color-warning-bg:rgba(255,159,10,.16); --color-warning-border:rgba(255,181,71,.45);
+  --color-danger:#FF6B5E;  --color-danger-bg:rgba(255,69,58,.16);  --color-danger-border:rgba(255,107,94,.45);
+  --color-success:#4CD07A; --color-success-bg:rgba(48,209,88,.16); --color-success-border:rgba(76,208,122,.45);
+  --color-estimate:#9A9AA3; --color-estimate-bg:rgba(118,118,128,.28);
+  --cat-air:#8EA6FF; --cat-air-tint:rgba(142,166,255,.18);
+  --cat-hotel:#C29BFF; --cat-hotel-tint:rgba(194,155,255,.18);
+  --cat-transport:#FFB547; --cat-transport-tint:rgba(255,181,71,.18);
+  --cat-meals:#FF8A70; --cat-meals-tint:rgba(255,138,112,.18);
+  --cat-comm:#5FD3EE; --cat-comm-tint:rgba(95,211,238,.18);
+  --cat-misc:#AEB4C0; --cat-misc-tint:rgba(174,180,192,.18);
+  --shadow-fab:0 8px 24px rgba(0,0,0,.5);
+}}
+:root[data-theme="dark"] {
+  --color-bg:#000000; --color-surface:#1C1C1E; --color-surface-2:#2C2C2E;
+  --color-fill:rgba(118,118,128,.24); --color-fill-pressed:rgba(118,118,128,.36);
+  --color-separator:rgba(84,84,88,.6);
+  --color-text:#F5F5F7; --color-text-2:#C7C7CC; --color-text-3:#9A9AA3; --color-text-disabled:#5C5C63;
+  --color-overlay:rgba(0,0,0,.6); --color-bar-blur:rgba(28,28,30,.86);
+  --color-primary:#3A66F5; --color-primary-pressed:#2F5BEA; --color-primary-tint:rgba(58,102,245,.22);
+  --color-on-primary:#FFFFFF; --color-focus-ring:#8EA6FF; --color-info:#8EA6FF; --color-info-bg:rgba(58,102,245,.22);
+  --color-warning:#FFB547; --color-warning-bg:rgba(255,159,10,.16); --color-warning-border:rgba(255,181,71,.45);
+  --color-danger:#FF6B5E;  --color-danger-bg:rgba(255,69,58,.16);  --color-danger-border:rgba(255,107,94,.45);
+  --color-success:#4CD07A; --color-success-bg:rgba(48,209,88,.16); --color-success-border:rgba(76,208,122,.45);
+  --color-estimate:#9A9AA3; --color-estimate-bg:rgba(118,118,128,.28);
+  --cat-air:#8EA6FF; --cat-air-tint:rgba(142,166,255,.18);
+  --cat-hotel:#C29BFF; --cat-hotel-tint:rgba(194,155,255,.18);
+  --cat-transport:#FFB547; --cat-transport-tint:rgba(255,181,71,.18);
+  --cat-meals:#FF8A70; --cat-meals-tint:rgba(255,138,112,.18);
+  --cat-comm:#5FD3EE; --cat-comm-tint:rgba(95,211,238,.18);
+  --cat-misc:#AEB4C0; --cat-misc-tint:rgba(174,180,192,.18);
+  --shadow-fab:0 8px 24px rgba(0,0,0,.5);
+}
+
+/* ---------- Reduced motion ---------- */
+@media (prefers-reduced-motion: reduce) {
+  :root { --dur-fast: 0ms; --dur-base: 0ms; --dur-slow: 0ms; }
+}
