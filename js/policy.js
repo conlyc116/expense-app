@@ -1,4 +1,5 @@
 // Policy rules: Butterfly T&E Policy (2026-03-17) + Taiwan process. See README.
+import { t } from './i18n.js';
 export const CATS = ['Air ticket', 'Hotel', 'Transportation', 'Meals', 'Communication', 'Misc'];
 export const CAT_ZH = { 'Air ticket': '機票', Hotel: '住宿', Transportation: '交通', Meals: '餐費', Communication: '通訊', Misc: '雜支' };
 export const CURRENCIES = ['NTD', 'RMB', 'THB', 'HKD', 'USD', 'JPY'];
@@ -88,8 +89,10 @@ export function airShortHaul(e) { const h = parseFloat(e.legHours); return isFin
 // opts.today（YYYY-MM-DD）僅供測試／可重現計算；平常不傳。
 export function evaluate(trip, expenses, opts = {}) {
   const today = opts.today || todayStr();
+  const lang = opts.lang || 'zh-Hant'; // 預設繁中（node 測試可重現）；app 傳入目前語言
   const byId = {}; const summary = [];
-  const add = (id, level, msg) => { (byId[id] = byId[id] || []).push({ level, msg }); };
+  const M = (key, args) => ({ key, args, msg: t(key, args, lang) });
+  const add = (id, level, key, args) => { (byId[id] = byId[id] || []).push({ level, ...M(key, args) }); };
   const usd = usdRate(trip);
   const biz = expenses.filter((e) => e.business !== false);
   const totals = { business: 0, personal: 0, count: biz.length, personalCount: expenses.length - biz.length, estimated: 0, missingNtd: 0 };
@@ -97,32 +100,32 @@ export function evaluate(trip, expenses, opts = {}) {
   for (const e of expenses) {
     const { ntd, actual } = ntdOf(e, trip);
     if (e.business === false) { totals.personal += ntd || 0; continue; }
-    if (ntd === null) { totals.missingNtd++; add(e.id, 'error', `缺少 ${curOf(e)} 匯率或金額，無法換算台幣`); continue; }
+    if (ntd === null) { totals.missingNtd++; add(e.id, 'error', 'pol.missingRate', { cur: curOf(e) }); continue; }
     totals.business += ntd;
-    if (!actual) { totals.estimated++; add(e.id, 'info', '台幣為估算，刷卡入帳後請填實扣台幣（含國外手續費）'); }
+    if (!actual) { totals.estimated++; add(e.id, 'info', 'pol.estimated'); }
     const st = hasCard(e) ? settleCard(e.card) : null;
-    if (st && st.dupUnrefunded) add(e.id, 'warn', `卡帳單有 ${st.dupUnrefunded} 筆重複扣款尚未退款，已從請款排除；請向商家／銀行申請退款`);
-    if (st && st.fullyRefunded) add(e.id, 'info', '這筆已全額退款（NT$ 0），建議刪除或改為私人');
+    if (st && st.dupUnrefunded) add(e.id, 'warn', 'pol.dupUnrefunded', { n: st.dupUnrefunded });
+    if (st && st.fullyRefunded) add(e.id, 'info', 'pol.fullyRefunded');
     const usdVal = ntd / usd;
-    if (usdVal > LIMITS.receiptUsd && !(e.photos && e.photos.length) && !e.receiptSeparate) add(e.id, 'warn', `超過 USD ${LIMITS.receiptUsd}（約 NT$${Math.round(LIMITS.receiptUsd * usd).toLocaleString()}），必須附收據或信用卡帳單截圖`);
-    if (e.date && trip.from && trip.to && (e.date < addDays(trip.from, -30) || e.date > addDays(trip.to, 1)) && e.category !== 'Air ticket') add(e.id, 'info', '日期不在出差期間內，請確認');
+    if (usdVal > LIMITS.receiptUsd && !(e.photos && e.photos.length) && !e.receiptSeparate) add(e.id, 'warn', 'pol.needReceipt', { usd: LIMITS.receiptUsd, ntd: Math.round(LIMITS.receiptUsd * usd).toLocaleString() });
+    if (e.date && trip.from && trip.to && (e.date < addDays(trip.from, -30) || e.date > addDays(trip.to, 1)) && e.category !== 'Air ticket') add(e.id, 'info', 'pol.dateOutside');
     if (e.category === 'Air ticket') {
-      if (e.cabin === 'Premium economy' && airShortHaul(e) && !e.preApproval) add(e.id, 'warn', '航程 < 5 小時只能搭經濟艙；豪經須附主管書面事前核准（勾選「已附事前核准」）');
-      if (e.cabin === 'Premium economy' && !(parseFloat(e.legHours) > 0) && !e.legUnder5h && !e.preApproval) add(e.id, 'info', '請填航程時數，才能檢查「< 5 小時只能經濟艙」');
-      if ((e.cabin === 'Business' || e.cabin === 'First') && !e.preApproval) add(e.id, 'warn', '商務／頭等艙須 ELT 書面事前核准');
+      if (e.cabin === 'Premium economy' && airShortHaul(e) && !e.preApproval) add(e.id, 'warn', 'pol.premiumShort');
+      if (e.cabin === 'Premium economy' && !(parseFloat(e.legHours) > 0) && !e.legUnder5h && !e.preApproval) add(e.id, 'info', 'pol.needHours');
+      if ((e.cabin === 'Business' || e.cabin === 'First') && !e.preApproval) add(e.id, 'warn', 'pol.bizFirst');
       const airCap = e.domestic ? LIMITS.domAirApproval : LIMITS.intlAirApproval;
-      if (usdVal > airCap && !e.preApproval) add(e.id, 'warn', `${e.domestic ? '國內' : '國際'}來回機票超過 USD ${airCap.toLocaleString()} 須 ELT 事前核准`);
+      if (usdVal > airCap && !e.preApproval) add(e.id, 'warn', e.domestic ? 'pol.airCapDom' : 'pol.airCapIntl', { cap: airCap.toLocaleString() });
     }
     if (e.category === 'Hotel') {
       const nights = Math.max(1, +e.nights || 1);
       const perNight = usdVal / nights;
-      if (perNight > LIMITS.hotelApproval) add(e.id, 'warn', `每晚約 USD ${Math.round(perNight)}，超過 USD ${LIMITS.hotelApproval} 須主管書面核准`);
-      else if (perNight > LIMITS.hotelGuideHigh) add(e.id, 'info', `每晚約 USD ${Math.round(perNight)}，高於一般城市 USD ${LIMITS.hotelGuideLow}–${LIMITS.hotelGuideHigh} 指引（高成本城市目標 USD ${LIMITS.hotelHighCost}）`);
-      if (!e.nights) add(e.id, 'info', '請填住宿晚數，才能檢查每晚金額');
+      if (perNight > LIMITS.hotelApproval) add(e.id, 'warn', 'pol.hotelApproval', { per: Math.round(perNight), cap: LIMITS.hotelApproval });
+      else if (perNight > LIMITS.hotelGuideHigh) add(e.id, 'info', 'pol.hotelHigh', { per: Math.round(perNight), low: LIMITS.hotelGuideLow, high: LIMITS.hotelGuideHigh, hc: LIMITS.hotelHighCost });
+      if (!e.nights) add(e.id, 'info', 'pol.needNights');
     }
     if (e.category === 'Meals' && e.shared) {
-      if (attendeeList(e).length < 2) add(e.id, 'warn', '多人用餐須列出所有出席者（含自己）');
-      if (!e.seniorPays) add(e.id, 'warn', '多人用餐須由職級最高者付款並報帳');
+      if (attendeeList(e).length < 2) add(e.id, 'warn', 'pol.listAttendees');
+      if (!e.seniorPays) add(e.id, 'warn', 'pol.seniorPays');
     }
   }
 
@@ -138,8 +141,8 @@ export function evaluate(trip, expenses, opts = {}) {
   for (const [d, v] of Object.entries(perDay)) {
     const usdDay = v.sum / usd;
     if (usdDay > LIMITS.mealUsdPerDay) {
-      const msg = `${d.slice(5)} 個人餐費約 USD ${Math.round(usdDay)}，超過每日上限 USD ${LIMITS.mealUsdPerDay}（含稅與小費）`;
-      v.ids.forEach((id) => add(id, 'warn', msg)); summary.push({ level: 'warn', msg });
+      const args = { md: d.slice(5), usd: Math.round(usdDay), cap: LIMITS.mealUsdPerDay };
+      v.ids.forEach((id) => add(id, 'warn', 'pol.mealCap', args)); summary.push({ level: 'warn', ...M('pol.mealCap', args) });
     }
   }
 
@@ -150,16 +153,15 @@ export function evaluate(trip, expenses, opts = {}) {
   if (base) {
     const due = addDays(base, LIMITS.deadlineDays);
     deadline = { base, due, daysLeft: daysBetween(today, due) };
-    if (deadline.daysLeft < 0) summary.unshift({ level: 'error', msg: `已超過 60 天送件期限（${due}），需主管核准＋正當理由` });
-    else if (deadline.daysLeft <= LIMITS.deadlineDangerDays) summary.unshift({ level: 'error', msg: `送件期限 ${due}，只剩 ${deadline.daysLeft} 天` });
-    else if (deadline.daysLeft <= LIMITS.deadlineWarnDays) summary.unshift({ level: 'warn', msg: `送件期限 ${due}，剩 ${deadline.daysLeft} 天` });
+    if (deadline.daysLeft < 0) summary.unshift({ level: 'error', ...M('pol.deadlineOver', { due }) });
+    else if (deadline.daysLeft <= LIMITS.deadlineDangerDays) summary.unshift({ level: 'error', ...M('pol.deadlineDanger', { due, n: deadline.daysLeft }) });
+    else if (deadline.daysLeft <= LIMITS.deadlineWarnDays) summary.unshift({ level: 'warn', ...M('pol.deadlineWarn', { due, n: deadline.daysLeft }) });
   }
 
   const counts = { warn: 0, error: 0, info: 0 };
   Object.values(byId).flat().forEach((w) => counts[w.level]++);
-  const label = { 'error': '項無法換算', warn: '項需處理', info: '項提醒' };
-  for (const lv of ['error', 'warn']) if (counts[lv]) summary.push({ level: lv, msg: `${counts[lv]} ${label[lv]}（見各筆說明）` });
-  if (totals.estimated) summary.push({ level: 'info', msg: `${totals.estimated} 筆台幣仍為估算，刷卡入帳後請填實扣金額` });
-  if (totals.personalCount) summary.push({ level: 'info', msg: `${totals.personalCount} 筆私人消費不會匯出` });
+  for (const lv of ['error', 'warn']) if (counts[lv]) summary.push({ level: lv, ...M(lv === 'error' ? 'pol.cntError' : 'pol.cntWarn', { n: counts[lv] }) });
+  if (totals.estimated) summary.push({ level: 'info', ...M('pol.sumEstimated', { n: totals.estimated }) });
+  if (totals.personalCount) summary.push({ level: 'info', ...M('pol.sumPersonal', { n: totals.personalCount }) });
   return { byId, summary, deadline, totals };
 }

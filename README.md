@@ -25,3 +25,13 @@ Any static host over HTTPS (service worker + camera need HTTPS). No server code.
 60-day deadline from earliest expense date · receipt required > USD 50 · own meals ≤ USD 150/day (shared meals counted per head) ·
 air: < 5h legs economy only, premium economy needs written pre-approval; business/first and > USD 4,000 need ELT approval ·
 hotel guideline USD 200–300/night, > USD 650 needs manager approval · shared meals list attendees, senior attendee pays · personal items never exported.
+
+## 介面語言（v1.3.0）
+- 繁體中文／English，首頁右上角與設定頁皆可切換，選擇存在 localStorage（`bt-lang`）；第一次開啟依瀏覽器語言。
+- 所有介面文字集中在 `js/i18n.js`（`TABLE`：key／繁中／English）。新增文字請加 key，不要把字串寫進其他檔。
+- 類別（`Air ticket` 等）與付款方式（`信用卡` 等）以代碼存入資料，顯示時才用 `catLabel()`／`payLabel()` 翻譯；匯出的 Excel 內容不隨語言改變。
+
+## 版本與更新（v1.3.1）
+- 版號：`js/version.js`（`APP_VERSION`），設定頁「關於」會顯示版號與已安裝的 service worker 快取版本；兩者不同代表畫面還是舊版，按「更新到最新版」（不會刪資料）。
+- service worker 對 app 檔案改為「網路優先」（`cache: 'no-cache'`），離線或網路慢（> 4 秒）才用快取；新版接手後會自動重新載入（編輯中只提示）。發版時請同步改 `sw.js` 的 `VERSION` 與 `js/version.js`（`tests/version.test.mjs` 會檢查）。
+- 照片失敗時畫面會留下錯誤面板（步驟＋錯誤名稱），設定頁可複製「診斷記錄」。

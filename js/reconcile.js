@@ -1,3 +1,4 @@
+import { t } from './i18n.js';
 // 卡帳對帳（design-spec 9.1）。純函式、不碰 DOM／IndexedDB，node 可直接測。
 // 配對規則：交易日 ±3 天 ＋ 原幣金額 ＋ 幣別；退款（負數）與同商家同額重複扣款自動併入同一群組。
 import { normCur, curOf, daysBetween, NON_CARD_PAY } from './policy.js';
@@ -27,7 +28,7 @@ export function parseStatement(text) {
   const ix = (n) => head.indexOf(n);
   const feeCol = ix('fx_fee_twd') >= 0 ? 'fx_fee_twd' : 'fee_twd';
   const need = ['txn_date', 'merchant_on_statement', 'original_ccy', 'original_amt', 'twd_charged', feeCol];
-  for (const n of need) if (ix(n) < 0) throw new Error(`卡帳 CSV 缺少欄位 ${n}`);
+  for (const n of need) if (ix(n) < 0) throw new Error(t('rec.csvMissing', { col: n }));
   return body.map((r, i) => {
     const amt = +r[ix('original_amt')];
     return { idx: i, post: r[ix('post_date')] || '', txn: r[ix('txn_date')], merchant: r[ix('merchant_on_statement')], base: baseMerchant(r[ix('merchant_on_statement')]), ccy: normCur(r[ix('original_ccy')]), amt, ntd: +r[ix('twd_charged')], fee: +r[ix(feeCol)] || 0, type: amt < 0 ? 'refund' : 'charge' };

@@ -1,9 +1,10 @@
 // On-device OCR with Tesseract.js (lazy-loaded, all files served locally from vendor/).
 import { detectDate } from './dateparse.js';
+import { t } from './i18n.js';
 let worker = null; let workerKey = ''; let progressCb = null;
 
 function loadScript(src) {
-  return new Promise((res, rej) => { const s = document.createElement('script'); s.src = src; s.onload = res; s.onerror = () => rej(new Error('無法載入 ' + src)); document.head.appendChild(s); });
+  return new Promise((res, rej) => { const s = document.createElement('script'); s.src = src; s.onload = res; s.onerror = () => rej(new Error(t('ocr.scriptFail', { src }))); document.head.appendChild(s); });
 }
 
 export async function recognize(blob, langs, onProgress) {
