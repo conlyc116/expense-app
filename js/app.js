@@ -12,7 +12,7 @@ async function getOcr() {
   return ocrMod;
 }
 const tidy = (s) => { const CJK = '\u3400-\u9fff\uf900-\ufaff'; return s.replace(new RegExp(`([${CJK}])\\s+(?=[${CJK}])`, 'g'), '$1').replace(/[ \t]+/g, ' ').trim(); };
-import { buildXlsx, buildReceiptsZip, buildBackup, shareOrDownload } from './export.js';
+import { buildXlsx, buildPptx, buildReceiptsZip, buildBackup, shareOrDownload, shareOrDownloadMany } from './export.js';
 
 // ---------- helpers ----------
 const $ = (s, el = document) => el.querySelector(s);
@@ -650,12 +650,24 @@ function exportSheet(trip, exps) {
       b.disabled = true; b.textContent = tr('common.building');
       try {
         const freshExps = await db.expensesOf(trip.id);
-        const res = b.dataset.build === 'xlsx' ? await buildXlsx(trip, freshExps, settings) : await buildReceiptsZip(trip, freshExps);
+        const isX = b.dataset.build === 'xlsx';
+        const res = isX ? await buildXlsx(trip, freshExps, settings) : await buildReceiptsZip(trip, freshExps);
         window.__lastExport = res; // (for automated tests)
+        // Excel 一起產生收據簡報（.pptx，Google 簡報可直接開）。簡報失敗不影響 Excel。
+        let ppt = null; let pptNote = '';
+        if (isX) {
+          try {
+            ppt = await buildPptx(trip, freshExps, settings); window.__lastPptx = ppt;
+            if (!ppt) pptNote = tr('exp.pptxNone'); else if (ppt.failed) pptNote = tr('exp.pptxSkipped', { n: ppt.failed });
+          } catch (err) { console.error(err); diagLog('pptx', err); pptNote = tr('exp.pptxFail', { msg: errMsg(err) }); }
+        }
         const box = b.parentElement;
-        box.innerHTML = `<div class="ready">✅ ${esc(res.name)}<span class="muted small">${b.dataset.build === 'xlsx' ? esc(tr('exp.xlsxMeta', { n: res.count, total: money(res.total) })) : esc(tr('exp.zipMeta', { n: res.count }))}</span></div>
-          <button class="btn primary block" data-share>${h('exp.share')}</button>`;
-        box.querySelector('[data-share]').onclick = async () => { const r = await shareOrDownload(res.blob, res.name); if (r === 'downloaded') toast(tr('common.downloaded')); };
+        const ready = (r, meta) => `<div class="ready">✅ ${esc(r.name)}<span class="muted small">${esc(meta)}</span></div>`;
+        box.innerHTML = ready(res, isX ? tr('exp.xlsxMeta', { n: res.count, total: money(res.total) }) : tr('exp.zipMeta', { n: res.count }))
+          + (ppt ? ready(ppt, tr('exp.pptxMeta', { n: ppt.pages })) : '')
+          + (pptNote ? `<p class="warn small" id="ppt-note">${esc(pptNote)}</p>` : '')
+          + `<button class="btn primary block" data-share>${h(ppt ? 'exp.shareAll' : 'exp.share')}</button>`;
+        box.querySelector('[data-share]').onclick = async () => { const r = await shareOrDownloadMany([res, ppt].filter(Boolean)); if (r === 'downloaded') toast(tr('common.downloaded')); };
       } catch (err) { console.error(err); b.disabled = false; b.textContent = tr('common.retry'); toast(tr('exp.exportFail', { msg: errMsg(err) }), 5000); }
     }));
   });

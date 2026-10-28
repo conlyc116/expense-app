@@ -35,3 +35,13 @@ hotel guideline USD 200–300/night, > USD 650 needs manager approval · shared 
 - 版號：`js/version.js`（`APP_VERSION`），設定頁「關於」會顯示版號與已安裝的 service worker 快取版本；兩者不同代表畫面還是舊版，按「更新到最新版」（不會刪資料）。
 - service worker 對 app 檔案改為「網路優先」（`cache: 'no-cache'`），離線或網路慢（> 4 秒）才用快取；新版接手後會自動重新載入（編輯中只提示）。發版時請同步改 `sw.js` 的 `VERSION` 與 `js/version.js`（`tests/version.test.mjs` 會檢查）。
 - 照片失敗時畫面會留下錯誤面板（步驟＋錯誤名稱），設定頁可複製「診斷記錄」。
+
+## 匯出格式（v1.3.2）
+- 匯出的 xlsx 直接填 `assets/template_blank.xlsx` 的 XML（`js/xlsxfill.js`），不再用 ExcelJS 讀寫整份檔案（已從 index.html／sw.js 移除；`vendor/exceljs.min.js` 可刪）。抬頭、合併儲存格、欄寬、字型、框線、數字格式、列高、列印設定全部沿用模板；只填資料並插入明細列／NOTES，下方簽核區整段下移。
+- 檔名：`出差名稱_YYYYMMDD.xlsx`（YYYYMMDD＝出差開始日；zip 為 `…_receipts.zip`）。
+- Google Sheets：上傳到 Google 雲端硬碟後「用 Google 試算表開啟」即可；Mac 的 Excel／Numbers／預覽程式也可開。
+
+## v1.3.3：分頁名稱與收據簡報
+- Excel 分頁名稱＝出差名稱（≤31 字元，去掉 `\ / ? * [ ] :`），不再出現 PRETECH_BET。
+- 按「產生公司 Excel ＋ 收據簡報」時，同時在手機上產生 `出差名稱_YYYYMMDD.pptx`（`js/pptxgen.js`，不需 Google 登入／API）：第 1 頁封面（出差名稱＋日期區間），之後每張照片一頁，照片等比例放到最大，頁面寫日期、類別、金額、幣別、說明。上傳到 Google 雲端硬碟後用 Google 簡報開啟。
+- 只含公務費用且有照片者，順序與 Excel 的 No. 相同；沒有照片時不產生簡報（Excel 照常）。

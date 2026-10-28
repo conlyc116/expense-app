@@ -1,12 +1,12 @@
 // Service worker: app shell precached; OCR engine + language data cached on first use.
-const VERSION = 'v1.3.1';
+const VERSION = 'v1.3.3';
 const SHELL = `bt-shell-${VERSION}`;
 const OCR = 'bt-ocr-v1';
 const THA_LANG = 'vendor/tesseract/lang/tha.traineddata.gz'; // 泰文（fast）；放進 OCR 快取，離線可用
 const SHELL_FILES = [
   './', 'index.html', 'styles.css', 'manifest.webmanifest',
-  'tokens.css', 'js/app.js', 'js/db.js', 'js/policy.js', 'js/reconcile.js', 'js/icons.js', 'js/ocr.js', 'js/dateparse.js', 'js/i18n.js', 'js/version.js', 'js/image.js', 'js/export.js',
-  'vendor/exceljs.min.js', 'vendor/jszip.min.js',
+  'tokens.css', 'js/app.js', 'js/db.js', 'js/policy.js', 'js/reconcile.js', 'js/icons.js', 'js/ocr.js', 'js/dateparse.js', 'js/i18n.js', 'js/version.js', 'js/image.js', 'js/export.js', 'js/xlsxfill.js', 'js/pptxgen.js',
+  'vendor/jszip.min.js',
   'assets/template_blank.xlsx',
   'icons/icon-192.png', 'icons/icon-512.png', 'icons/apple-touch-icon.png', 'icons/icon-maskable-512.png',
 ];

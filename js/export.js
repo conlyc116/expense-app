@@ -1,7 +1,11 @@
-// Company xlsx export (ExcelJS keeps the template styling), receipts zip, JSON backup.
+// Company xlsx export (fills the company template XML directly), receipts zip, JSON backup.
 import { ntdOf, rateOf, curOf, attendeeList, amountOf, hasCard, CAT_ZH } from './policy.js';
 import { get } from './db.js';
 import { blobToDataURL } from './image.js';
+import { t, getLang, catLabel } from './i18n.js';
+import { buildXlsxBytes, exportFileName, sheetNameFor, XLSX_MIME } from './xlsxfill.js';
+import { buildPptxBytes, imageSize, sniffImage, PPTX_MIME } from './pptxgen.js';
+import { readExifOrientation, compressImage } from './image.js';
 
 const fmtDate = (s) => (s ? s.replace(/-/g, '/') : '');
 const pad2 = (n) => String(n).padStart(2, '0');
@@ -52,65 +56,50 @@ export function buildSheetModel(trip, expenses, settings = {}) {
   return { items, total, notes: autoNotes(trip, items), count: items.length };
 }
 
-const ORANGE = 'FFC65911';
-const RATE_FMT = '_(* #,##0.00_);_(* \\(#,##0.00\\);_(* "-"??_);_(@_)'; // 與公司既有報帳單一致（2 位小數）
-
+// 產生公司報帳單 xlsx：直接填 assets/template_blank.xlsx 的 XML（見 xlsxfill.js），不經 ExcelJS。
 export async function buildXlsx(trip, expenses, settings = {}) {
-  if (!window.ExcelJS) throw new Error('ExcelJS 尚未載入');
+  if (!window.JSZip) throw new Error(t('exp.noJszip'));
   const { items, total, notes } = buildSheetModel(trip, expenses, settings);
-  const buf = await (await fetch('assets/template_blank.xlsx')).arrayBuffer();
-  const wb = new window.ExcelJS.Workbook();
-  await wb.xlsx.load(buf);
-  const ws = wb.getWorksheet('PRETECH_BET') || wb.worksheets[0];
+  const resp = await fetch('assets/template_blank.xlsx');
+  if (!resp || !resp.ok) throw new Error(t('exp.noTemplate', { status: resp ? resp.status : '' }));
+  const data = {
+    empNo: settings.empNo, empName: settings.empName, destination: trip.destination || '', from: trip.from, to: trip.to,
+    checkMarks: settings.checkMarks !== false, total, notes, sheetName: sheetNameFor(trip),
+    items: items.map((it) => ({ no: it.no, date: it.e.date, category: it.e.category, desc: it.desc, currency: it.currency, amount: it.amount, rate: it.rate, ntd: it.ntd, check: it.check })),
+  };
+  const bytes = await buildXlsxBytes(window.JSZip, await resp.arrayBuffer(), data);
+  return { blob: new Blob([bytes], { type: XLSX_MIME }), name: exportFileName(trip), total, count: items.length };
+}
 
-  if (settings.empNo) ws.getCell('A4').value = `Employee Number: ${settings.empNo}`;
-  if (settings.empName) ws.getCell('A5').value = `Employee Name: ${settings.empName}`;
-  ws.getCell('A6').value = `Destination: ${trip.destination || ''}`;
-  ws.getCell('A7').value = `Period: From ${fmtDate(trip.from)} to ${fmtDate(trip.to)}`;
-
-  const n = items.length;
-  if (n > 1) {
-    ws.insertRows(10, Array.from({ length: n - 1 }, () => []), 'n');
-    const proto = ws.getRow(9);
-    for (let r = 10; r < 9 + n; r++) {
-      const row = ws.getRow(r); row.height = proto.height || 30;
-      for (let c = 1; c <= 9; c++) row.getCell(c).style = JSON.parse(JSON.stringify(proto.getCell(c).style || {}));
+// ---- 收據簡報（.pptx）：每張照片一頁。直接在手機上產生，不需要 Google 登入／API；用 Google 簡報開啟即可 ----
+// 照片進簡報前：JPEG(無 EXIF 旋轉)／PNG 直接用原檔；其他（HEIC、有旋轉資訊的 JPEG…）先用 canvas 轉成已轉正的 JPEG。
+export async function prepareSlideImage(blob, normalize = defaultNormalize) {
+  const bytes = new Uint8Array(await blob.arrayBuffer());
+  const kind = sniffImage(bytes); const size = kind ? imageSize(bytes) : null;
+  if (kind && size && size.w > 0 && size.h > 0 && (kind === 'png' || readExifOrientation(bytes.buffer) === 1)) return { bytes, ext: kind, w: size.w, h: size.h };
+  return normalize(blob);
+}
+async function defaultNormalize(blob) {
+  const { blob: jpg, width, height } = await compressImage(blob, 2000, 0.85);
+  return { bytes: new Uint8Array(await jpg.arrayBuffer()), ext: 'jpeg', w: width, h: height };
+}
+export async function buildPptx(trip, expenses, settings = {}, opts = {}) {
+  if (!window.JSZip) throw new Error(t('exp.noJszip'));
+  const items = exportItems(trip, expenses); const slides = []; let failed = 0;
+  for (const it of items) {
+    const ids = it.e.photos || []; let part = 0;
+    for (const pid of ids) {
+      const p = await get('photos', pid); if (!p || !p.blob) continue;
+      part++; let image = null;
+      try { image = await prepareSlideImage(p.blob, opts.normalize); } catch (err) { failed++; console.warn('pptx image', err); }
+      slides.push({ no: it.no, date: it.e.date, category: catLabel(it.e.category), amount: it.amount, currency: it.currency, ntd: it.ntd, desc: it.desc, part, parts: ids.length, image });
     }
   }
-  const useChecks = settings.checkMarks !== false;
-  items.forEach((it, i) => {
-    const r = ws.getRow(9 + i);
-    r.height = 30;
-    const [y, m, d] = (it.e.date || '').split('-').map(Number);
-    r.getCell(1).value = it.no;
-    r.getCell(2).value = y ? new Date(Date.UTC(y, m - 1, d)) : null;
-    r.getCell(3).value = it.e.category;
-    r.getCell(4).value = it.desc;
-    r.getCell(5).value = it.currency;
-    r.getCell(6).value = it.amount;            // 原幣（合併項為扣掉退款後的淨額）
-    r.getCell(7).value = it.rate;              // plain number (NTD / amount；估算時為使用的匯率)
-    r.getCell(8).value = it.ntd;               // plain number, no formula
-    r.getCell(7).numFmt = RATE_FMT;
-    r.getCell(8).numFmt = '#,##0';
-    if (it.est) for (const c of [7, 8]) { const cell = r.getCell(c); cell.font = Object.assign({}, cell.font, { color: { argb: ORANGE } }); }
-    if (useChecks && it.check) { r.getCell(9).value = it.check; r.getCell(9).alignment = { horizontal: 'center', vertical: 'middle' }; }
-  });
-  const totalRow = 9 + Math.max(n, 1) + 1;   // one blank bordered row between items and total
-  ws.getCell(`G${totalRow}`).value = 'Total';
-  ws.getCell(`H${totalRow}`).value = total;  // plain number, no formula
-  ws.getCell(`H${totalRow}`).numFmt = '#,##0';
-  for (const col of ['G', 'H']) ws.getCell(`${col}${totalRow}`).font = { name: 'Times New Roman', size: 12, bold: true };
-
-  if (notes.length) {
-    const at = totalRow + 1;                 // NOTES 緊接在 Total 下一列（與公司既有報帳單一致）
-    ws.insertRows(at, [['NOTES:'], ...notes.map((t) => [t])], 'n');
-    for (let r = at; r <= at + notes.length; r++) {
-      const c = ws.getCell(`A${r}`); c.font = { name: 'Times New Roman', size: 12, bold: r === at }; ws.getRow(r).height = 18;
-    }
-  }
-  const out = await wb.xlsx.writeBuffer();
-  const fname = `PRETECH_BET_${(trip.from || '').replace(/-/g, '')}${trip.destination ? '_' + trip.destination.replace(/[\\/:*?"<>|,\s-]+/g, '-').slice(0, 30) : ''}.xlsx`;
-  return { blob: new Blob([out], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }), name: fname, total, count: n };
+  if (!slides.length) return null;
+  slides.forEach((s) => { const same = slides.filter((x) => x.no === s.no); s.parts = same.length; s.part = same.indexOf(s) + 1; });
+  const labels = { count: t('ppt.count', { n: slides.length }), no: t('ppt.no'), date: t('ppt.date'), category: t('ppt.category'), amount: t('ppt.amount'), ntd: t('ppt.ntd'), desc: t('ppt.desc'), noPhoto: t('ppt.noPhoto') };
+  const { bytes, pages } = await buildPptxBytes(window.JSZip, { title: trip.destination || t('trip.fallbackTitle'), from: trip.from, to: trip.to, lang: getLang() === 'en' ? 'en-US' : 'zh-TW', labels, slides });
+  return { blob: new Blob([bytes], { type: PPTX_MIME }), name: exportFileName(trip, 'pptx'), count: slides.length, pages, failed };
 }
 
 export async function buildReceiptsZip(trip, expenses) {
@@ -128,7 +117,7 @@ export async function buildReceiptsZip(trip, expenses) {
   const list = items.map((it) => `${pad2(it.no)}\t${it.e.date || ''}\t${it.e.category}\t${it.desc}\t${it.currency} ${it.amount}\tNT$${it.ntd ?? ''}\t${(it.e.photos || []).length ? '' : (it.e.receiptSeparate ? '(receipt separate)' : '(no photo)')}`).join('\n');
   zip.file('00_index.txt', `Receipts - ${trip.destination} ${trip.from} ~ ${trip.to}\nNo.\tDate\tCategory\tDescription\tAmount\tNTD\n${list}\n`);
   const blob = await zip.generateAsync({ type: 'blob', compression: 'STORE' });
-  return { blob, name: `receipts_${(trip.from || '').replace(/-/g, '')}.zip`, count };
+  return { blob, name: exportFileName(trip, 'zip', '_receipts'), count };
 }
 
 export async function buildBackup(trips, expensesByTrip, includePhotos = true) {
@@ -142,14 +131,18 @@ export async function buildBackup(trips, expensesByTrip, includePhotos = true) {
 }
 
 // iOS: navigator.share must run inside a tap, so callers build first, then call this from a second tap.
-export async function shareOrDownload(blob, name) {
-  const file = new File([blob], name, { type: blob.type });
-  if (navigator.canShare && navigator.canShare({ files: [file] })) {
-    try { await navigator.share({ files: [file], title: name }); return 'shared'; } catch (err) { if (err && err.name === 'AbortError') return 'cancelled'; }
+export async function shareOrDownloadMany(list) {
+  const files = list.map(({ blob, name }) => new File([blob], name, { type: blob.type }));
+  if (navigator.canShare && navigator.canShare({ files })) {
+    try { await navigator.share({ files, title: list[0].name }); return 'shared'; } catch (err) { if (err && err.name === 'AbortError') return 'cancelled'; }
   }
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a'); a.href = url; a.download = name; document.body.appendChild(a); a.click(); a.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 30000);
+  for (let i = 0; i < list.length; i++) {
+    const url = URL.createObjectURL(list[i].blob);
+    const a = document.createElement('a'); a.href = url; a.download = list[i].name; document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 30000);
+    if (i < list.length - 1) await new Promise((r) => setTimeout(r, 600)); // 連續下載之間稍等，避免 Safari 擋掉第二個
+  }
   return 'downloaded';
 }
+export const shareOrDownload = (blob, name) => shareOrDownloadMany([{ blob, name }]);
 export { CAT_ZH };
